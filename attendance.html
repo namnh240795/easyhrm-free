@@ -375,6 +375,20 @@
                     <div style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.5rem;" id="detection-time">-</div>
                 </div>
 
+                <div class="status-card" style="margin-top: 1rem;">
+                    <h3>🔍 Face Detection Debug</h3>
+                    <div style="font-size: 0.9rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                        <div><strong>Faces Detected:</strong> <span id="debug-faces">0</span></div>
+                        <div><strong>Registered Faces:</strong> <span id="debug-registered">0</span></div>
+                        <div><strong>Best Match:</strong> <span id="debug-match">None</span></div>
+                        <div><strong>Match Distance:</strong> <span id="debug-distance">-</span></div>
+                        <div><strong>Threshold:</strong> <span id="debug-threshold">0.5</span></div>
+                        <div><strong>Attendance Active:</strong> <span id="debug-active">No</span></div>
+                        <div><strong>Test Mode:</strong> <span id="debug-test">No</span></div>
+                        <div><strong>Within Hours:</strong> <span id="debug-hours">-</span></div>
+                    </div>
+                </div>
+
                 <div class="controls">
                     <button id="toggle-attendance-btn" class="btn btn-primary">Start Attendance</button>
                     <button id="test-mode-btn" class="btn btn-secondary">Test Mode: Off</button>

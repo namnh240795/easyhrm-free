@@ -37,6 +37,16 @@ const testModeBtn = document.getElementById('test-mode-btn');
 const clearAttendanceBtn = document.getElementById('clear-attendance-btn');
 const filterBtns = document.querySelectorAll('.filter-btn');
 
+// Debug elements
+const debugFacesEl = document.getElementById('debug-faces');
+const debugRegisteredEl = document.getElementById('debug-registered');
+const debugMatchEl = document.getElementById('debug-match');
+const debugDistanceEl = document.getElementById('debug-distance');
+const debugThresholdEl = document.getElementById('debug-threshold');
+const debugActiveEl = document.getElementById('debug-active');
+const debugTestEl = document.getElementById('debug-test');
+const debugHoursEl = document.getElementById('debug-hours');
+
 // State
 let modelsLoaded = false;
 let stream = null;
@@ -110,6 +120,9 @@ async function loadModels() {
         } else {
             updateStatus('ready', `Ready! ${faceCount} face(s) registered. Click "Start Attendance" to begin tracking.`);
         }
+
+        // Update debug panel
+        updateDebugPanel();
     } catch (error) {
         throw new Error('Failed to load models: ' + error.message);
     }
@@ -279,6 +292,9 @@ function startFaceDetectionLoop() {
         faceapi.draw.drawDetections(canvas, resizedDetections);
         faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
 
+        // Update debug panel with detection info
+        updateDebugInfo(detections);
+
         // Process detected faces for attendance (only when active)
         if (isAttendanceActive && detections.length > 0) {
             await processFaceDetection(detections[0]);
@@ -286,6 +302,41 @@ function startFaceDetectionLoop() {
     }, 500); // Scan every 500ms
 
     console.log('Face detection loop started');
+}
+
+/**
+ * Update debug panel with real-time detection info
+ */
+function updateDebugInfo(detections) {
+    debugFacesEl.textContent = detections.length;
+    debugRegisteredEl.textContent = registeredFaces.length;
+
+    if (detections.length > 0 && registeredFaces.length > 0) {
+        const match = findMatch(detections[0].descriptor);
+        if (match) {
+            debugMatchEl.textContent = match.face.name;
+            debugMatchEl.style.color = match.distance < 0.4 ? '#10b981' : match.distance < 0.5 ? '#f59e0b' : '#ef4444';
+            debugDistanceEl.textContent = match.distance.toFixed(4);
+        } else {
+            debugMatchEl.textContent = 'No match';
+            debugMatchEl.style.color = '#ef4444';
+            debugDistanceEl.textContent = '-';
+        }
+    } else {
+        debugMatchEl.textContent = 'None';
+        debugMatchEl.style.color = 'inherit';
+        debugDistanceEl.textContent = '-';
+    }
+}
+
+/**
+ * Update debug panel with static info
+ */
+function updateDebugPanel() {
+    debugThresholdEl.textContent = MATCH_THRESHOLD.toString();
+    debugActiveEl.textContent = isAttendanceActive ? 'Yes' : 'No';
+    debugTestEl.textContent = testMode ? 'Yes' : 'No';
+    debugHoursEl.textContent = isWithinWorkingHours() ? 'Yes' : 'No';
 }
 
 /**
@@ -535,12 +586,14 @@ function toggleAttendance() {
         toggleAttendanceBtn.classList.remove('btn-primary');
         toggleAttendanceBtn.classList.add('btn-danger');
         updateStatus('ready', '🎥 Attendance tracking ACTIVE! Look at the camera to check in/out.');
+        debugActiveEl.textContent = 'Yes';
         console.log('Attendance tracking started');
     } else {
         toggleAttendanceBtn.textContent = 'Start Attendance';
         toggleAttendanceBtn.classList.remove('btn-danger');
         toggleAttendanceBtn.classList.add('btn-primary');
         updateStatus('ready', `⏸️ Attendance tracking paused. ${registeredFaces.length} face(s) registered.`);
+        debugActiveEl.textContent = 'No';
         console.log('Attendance tracking stopped');
     }
 }
@@ -556,13 +609,17 @@ function toggleTestMode() {
         testModeBtn.classList.remove('btn-secondary');
         testModeBtn.classList.add('btn-primary');
         updateStatus('ready', '🧪 Test mode enabled! Attendance will work outside working hours.');
+        debugTestEl.textContent = 'Yes';
         console.log('Test mode enabled');
     } else {
         testModeBtn.classList.remove('btn-primary');
         testModeBtn.classList.add('btn-secondary');
         updateWorkingHoursStatus();
+        debugTestEl.textContent = 'No';
         console.log('Test mode disabled');
     }
+
+    updateDebugPanel();
 }
 
 /**
