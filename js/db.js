@@ -8,6 +8,8 @@ class FaceDB {
         this.dbName = 'FaceRecognitionDB';
         this.storeName = 'registeredFaces';
         this.workstationStoreName = 'workstation';
+        this.attendanceStoreName = 'attendance';
+        this.activeSessionStoreName = 'activeSessions';
         this.db = null;
     }
 
@@ -45,6 +47,26 @@ class FaceDB {
                 // Create object store for workstation (single record with key 'config')
                 if (!db.objectStoreNames.contains(this.workstationStoreName)) {
                     db.createObjectStore(this.workstationStoreName, { keyPath: 'id' });
+                }
+
+                // Create object store for attendance records
+                if (!db.objectStoreNames.contains(this.attendanceStoreName)) {
+                    const attendanceStore = db.createObjectStore(this.attendanceStoreName, {
+                        keyPath: 'id',
+                        autoIncrement: true
+                    });
+                    attendanceStore.createIndex('faceId', 'faceId', { unique: false });
+                    attendanceStore.createIndex('timestamp', 'timestamp', { unique: false });
+                    attendanceStore.createIndex('type', 'type', { unique: false });
+                    attendanceStore.createIndex('date', 'date', { unique: false });
+                }
+
+                // Create object store for active sessions (tracks who's currently checked in)
+                if (!db.objectStoreNames.contains(this.activeSessionStoreName)) {
+                    const sessionStore = db.createObjectStore(this.activeSessionStoreName, {
+                        keyPath: 'faceId'
+                    });
+                    sessionStore.createIndex('checkInTime', 'checkInTime', { unique: false });
                 }
             };
         });
@@ -267,6 +289,335 @@ class FaceDB {
     async isWorkstationConfigured() {
         const ws = await this.getWorkstation();
         return ws !== null;
+    }
+
+    // ==================== Attendance Methods ====================
+
+    /**
+     * Record check-in
+     * @param {number} faceId - Face ID
+     * @param {string} name - User name
+     * @param {number} confidence - Match confidence
+     */
+    async recordCheckIn(faceId, name, confidence) {
+        if (!this.db) {
+            await this.open();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction([this.attendanceStoreName, this.activeSessionStoreName], 'readwrite');
+            const attendanceStore = transaction.objectStore(this.attendanceStoreName);
+            const sessionStore = transaction.objectStore(this.activeSessionStoreName);
+
+            const now = new Date();
+            const dateKey = now.toISOString().split('T')[0];
+
+            const attendanceRecord = {
+                faceId: faceId,
+                name: name,
+                type: 'check-in',
+                timestamp: now.toISOString(),
+                date: dateKey,
+                confidence: confidence,
+                workstationName: null // Will be filled if workstation is set
+            };
+
+            // Get workstation name if available
+            const wsRequest = this.db.transaction(this.workstationStoreName).objectStore(this.workstationStoreName).get('config');
+            wsRequest.onsuccess = () => {
+                if (wsRequest.result) {
+                    attendanceRecord.workstationName = wsRequest.result.name;
+                    attendanceRecord.workstationLocation = wsRequest.result.location;
+                }
+
+                const addRequest = attendanceStore.add(attendanceRecord);
+
+                addRequest.onsuccess = () => {
+                    // Create active session
+                    sessionStore.put({
+                        faceId: faceId,
+                        name: name,
+                        checkInTime: now.toISOString(),
+                        attendanceId: addRequest.result
+                    });
+
+                    resolve(addRequest.result);
+                };
+
+                addRequest.onerror = () => {
+                    reject(new Error('Failed to record check-in'));
+                };
+            };
+
+            wsRequest.onerror = () => {
+                reject(new Error('Failed to get workstation info'));
+            };
+        });
+    }
+
+    /**
+     * Record check-out
+     * @param {number} faceId - Face ID
+     * @param {string} name - User name
+     * @param {number} confidence - Match confidence
+     */
+    async recordCheckOut(faceId, name, confidence) {
+        if (!this.db) {
+            await this.open();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction([this.attendanceStoreName, this.activeSessionStoreName], 'readwrite');
+            const attendanceStore = transaction.objectStore(this.attendanceStoreName);
+            const sessionStore = transaction.objectStore(this.activeSessionStoreName);
+
+            const now = new Date();
+            const dateKey = now.toISOString().split('T')[0];
+
+            // First get the active session to calculate duration
+            const sessionRequest = sessionStore.get(faceId);
+
+            sessionRequest.onsuccess = () => {
+                const session = sessionRequest.result;
+                let duration = null;
+
+                if (session) {
+                    const checkInTime = new Date(session.checkInTime);
+                    duration = Math.round((now - checkInTime) / 1000 / 60); // Duration in minutes
+                }
+
+                const attendanceRecord = {
+                    faceId: faceId,
+                    name: name,
+                    type: 'check-out',
+                    timestamp: now.toISOString(),
+                    date: dateKey,
+                    confidence: confidence,
+                    duration: duration,
+                    workstationName: null
+                };
+
+                // Get workstation name if available
+                const wsRequest = this.db.transaction(this.workstationStoreName).objectStore(this.workstationStoreName).get('config');
+                wsRequest.onsuccess = () => {
+                    if (wsRequest.result) {
+                        attendanceRecord.workstationName = wsRequest.result.name;
+                        attendanceRecord.workstationLocation = wsRequest.result.location;
+                    }
+
+                    const addRequest = attendanceStore.add(attendanceRecord);
+
+                    addRequest.onsuccess = () => {
+                        // Remove active session
+                        sessionStore.delete(faceId);
+
+                        resolve({ id: addRequest.result, duration: duration });
+                    };
+
+                    addRequest.onerror = () => {
+                        reject(new Error('Failed to record check-out'));
+                    };
+                };
+            };
+
+            sessionRequest.onerror = () => {
+                reject(new Error('Failed to get active session'));
+            };
+        });
+    }
+
+    /**
+     * Get attendance records for a specific date
+     * @param {string} date - Date in YYYY-MM-DD format
+     */
+    async getAttendanceByDate(date) {
+        if (!this.db) {
+            await this.open();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction([this.attendanceStoreName], 'readonly');
+            const objectStore = transaction.objectStore(this.attendanceStoreName);
+            const index = objectStore.index('date');
+            const request = index.getAll(date);
+
+            request.onsuccess = () => {
+                resolve(request.result.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)));
+            };
+
+            request.onerror = () => {
+                reject(new Error('Failed to get attendance records'));
+            };
+        });
+    }
+
+    /**
+     * Get all attendance records
+     */
+    async getAllAttendance() {
+        if (!this.db) {
+            await this.open();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction([this.attendanceStoreName], 'readonly');
+            const objectStore = transaction.objectStore(this.attendanceStoreName);
+            const request = objectStore.getAll();
+
+            request.onsuccess = () => {
+                resolve(request.result.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
+            };
+
+            request.onerror = () => {
+                reject(new Error('Failed to get attendance records'));
+            };
+        });
+    }
+
+    /**
+     * Get all active sessions (currently checked in users)
+     */
+    async getActiveSessions() {
+        if (!this.db) {
+            await this.open();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction([this.activeSessionStoreName], 'readonly');
+            const objectStore = transaction.objectStore(this.activeSessionStoreName);
+            const request = objectStore.getAll();
+
+            request.onsuccess = () => {
+                resolve(request.result);
+            };
+
+            request.onerror = () => {
+                reject(new Error('Failed to get active sessions'));
+            };
+        });
+    }
+
+    /**
+     * Check if a user is currently checked in
+     * @param {number} faceId - Face ID
+     */
+    async isCheckedIn(faceId) {
+        if (!this.db) {
+            await this.open();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction([this.activeSessionStoreName], 'readonly');
+            const objectStore = transaction.objectStore(this.activeSessionStoreName);
+            const request = objectStore.get(faceId);
+
+            request.onsuccess = () => {
+                resolve(!!request.result);
+            };
+
+            request.onerror = () => {
+                reject(new Error('Failed to check session status'));
+            };
+        });
+    }
+
+    /**
+     * Delete attendance record
+     * @param {number} id - Attendance record ID
+     */
+    async deleteAttendance(id) {
+        if (!this.db) {
+            await this.open();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction([this.attendanceStoreName], 'readwrite');
+            const objectStore = transaction.objectStore(this.attendanceStoreName);
+            const request = objectStore.delete(id);
+
+            request.onsuccess = () => {
+                resolve(true);
+            };
+
+            request.onerror = () => {
+                reject(new Error('Failed to delete attendance record'));
+            };
+        });
+    }
+
+    /**
+     * Clear all attendance records
+     */
+    async clearAttendance() {
+        if (!this.db) {
+            await this.open();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction([this.attendanceStoreName, this.activeSessionStoreName], 'readwrite');
+            const attendanceStore = transaction.objectStore(this.attendanceStoreName);
+            const sessionStore = transaction.objectStore(this.activeSessionStoreName);
+
+            attendanceStore.clear().onsuccess = () => {
+                sessionStore.clear().onsuccess = () => {
+                    resolve(true);
+                };
+            };
+        });
+    }
+
+    /**
+     * Get attendance summary for a user
+     * @param {number} faceId - Face ID
+     * @param {string} startDate - Start date in YYYY-MM-DD format
+     * @param {string} endDate - End date in YYYY-MM-DD format
+     */
+    async getUserAttendanceSummary(faceId, startDate, endDate) {
+        if (!this.db) {
+            await this.open();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction([this.attendanceStoreName], 'readonly');
+            const objectStore = transaction.objectStore(this.attendanceStoreName);
+            const request = objectStore.getAll();
+
+            request.onsuccess = () => {
+                const records = request.result.filter(r => {
+                    const recordDate = r.date;
+                    return r.faceId === faceId &&
+                           recordDate >= startDate &&
+                           recordDate <= endDate;
+                });
+
+                // Calculate summary
+                let totalMinutes = 0;
+                let checkIns = 0;
+                let checkOuts = 0;
+
+                records.forEach(r => {
+                    if (r.type === 'check-in') checkIns++;
+                    if (r.type === 'check-out') {
+                        checkOuts++;
+                        if (r.duration) totalMinutes += r.duration;
+                    }
+                });
+
+                resolve({
+                    records: records.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)),
+                    summary: {
+                        totalMinutes: totalMinutes,
+                        totalHours: (totalMinutes / 60).toFixed(2),
+                        checkIns: checkIns,
+                        checkOuts: checkOuts
+                    }
+                });
+            };
+
+            request.onerror = () => {
+                reject(new Error('Failed to get attendance summary'));
+            };
+        });
     }
 }
 
