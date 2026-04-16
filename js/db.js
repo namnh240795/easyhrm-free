@@ -18,7 +18,8 @@ class FaceDB {
      */
     async open() {
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this.dbName, 1);
+            // Version 2: Added attendance and activeSessions stores
+            const request = indexedDB.open(this.dbName, 2);
 
             request.onerror = () => {
                 reject(new Error('Failed to open database'));
@@ -31,6 +32,7 @@ class FaceDB {
 
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
+                const oldVersion = event.oldVersion;
 
                 // Create object store for registered faces
                 if (!db.objectStoreNames.contains(this.storeName)) {

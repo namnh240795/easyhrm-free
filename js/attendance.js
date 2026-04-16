@@ -35,6 +35,7 @@ const systemStatusEl = document.getElementById('system-status');
 const toggleAttendanceBtn = document.getElementById('toggle-attendance-btn');
 const testModeBtn = document.getElementById('test-mode-btn');
 const clearAttendanceBtn = document.getElementById('clear-attendance-btn');
+const resetDbBtn = document.getElementById('reset-db-btn');
 const filterBtns = document.querySelectorAll('.filter-btn');
 
 // Debug elements
@@ -642,6 +643,42 @@ async function clearAttendance() {
 }
 
 /**
+ * Reset database (delete and recreate)
+ * WARNING: This will delete ALL data including registered faces
+ */
+async function resetDatabase() {
+    if (!confirm('⚠️ WARNING: This will delete ALL data including:\n\n• Registered faces\n• Workstation settings\n• Attendance records\n\nYou will need to re-register all faces.\n\nContinue?')) {
+        return;
+    }
+
+    try {
+        // Close current database connection
+        if (faceDB.db) {
+            faceDB.db.close();
+        }
+
+        // Delete the entire database
+        const deleteRequest = indexedDB.deleteDatabase('FaceRecognitionDB');
+
+        deleteRequest.onsuccess = async () => {
+            console.log('Database deleted successfully');
+            alert('Database reset! Page will reload now.');
+
+            // Reload the page to recreate database with new schema
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        };
+
+        deleteRequest.onerror = () => {
+            alert('Error deleting database: ' + deleteRequest.error);
+        };
+    } catch (error) {
+        alert('Error resetting database: ' + error.message);
+    }
+}
+
+/**
  * Update status indicator
  */
 function updateStatus(type, message) {
@@ -662,6 +699,7 @@ function escapeHtml(text) {
 toggleAttendanceBtn.addEventListener('click', toggleAttendance);
 testModeBtn.addEventListener('click', toggleTestMode);
 clearAttendanceBtn.addEventListener('click', clearAttendance);
+resetDbBtn.addEventListener('click', resetDatabase);
 
 // Initialize when page loads
 window.addEventListener('DOMContentLoaded', init);
