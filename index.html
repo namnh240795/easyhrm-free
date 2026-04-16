@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Recognition System</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>Face Recognition System</h1>
+            <p class="subtitle">Register and validate faces using AI-powered recognition</p>
+        </header>
+
+        <main class="main-content">
+            <div class="card-container">
+                <div class="card">
+                    <div class="card-icon">📝</div>
+                    <h2>Register Face</h2>
+                    <p>Capture and store your face descriptor for future recognition</p>
+                    <ul class="features">
+                        <li>Real-time face detection</li>
+                        <li>Secure local storage</li>
+                        <li>Quick registration process</li>
+                    </ul>
+                    <a href="register.html" class="btn btn-primary">Register Face</a>
+                </div>
+
+                <div class="card">
+                    <div class="card-icon">✅</div>
+                    <h2>Validate Face</h2>
+                    <p>Verify if a face matches any registered users</p>
+                    <ul class="features">
+                        <li>Instant face matching</li>
+                        <li>Confidence scoring</li>
+                        <li>Real-time validation</li>
+                    </ul>
+                    <a href="validate.html" class="btn btn-secondary">Validate Face</a>
+                </div>
+            </div>
+
+            <div class="info-section">
+                <h3>How It Works</h3>
+                <div class="steps">
+                    <div class="step">
+                        <span class="step-number">1</span>
+                        <p>Register your face by capturing a photo</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-number">2</span>
+                        <p>Your face descriptor is stored locally in IndexedDB</p>
+                    </div>
+                    <div class="step">
+                        <span class="step-number">3</span>
+                        <p>Validate faces anytime by comparing with stored data</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="privacy-notice">
+                <h4>Privacy Notice</h4>
+                <p>All face data is stored locally in your browser using IndexedDB. No data is sent to any server. Your face information never leaves your device.</p>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>Powered by face-api.js | Pure client-side face recognition</p>
+        </footer>
+    </div>
+</body>
+</html>

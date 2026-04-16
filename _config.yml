@@ -1,0 +1,22 @@
+# Jekyll configuration for GitHub Pages
+# This file prevents Jekyll from processing certain files
+
+theme: null
+plugins: []
+
+# Exclude files from Jekyll processing
+exclude:
+  - README.md
+  - LICENSE
+  - .gitignore
+  - _config.yml
+
+# Keep these files as-is
+keep_files:
+  - js
+  - css
+  - models
+
+# Disable Jekyll front-matter processing
+markdown: null
+highlighter: null
