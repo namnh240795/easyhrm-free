@@ -306,54 +306,71 @@ class FaceDB {
             await this.open();
         }
 
-        return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction([this.attendanceStoreName, this.activeSessionStoreName], 'readwrite');
-            const attendanceStore = transaction.objectStore(this.attendanceStoreName);
-            const sessionStore = transaction.objectStore(this.activeSessionStoreName);
+        return new Promise(async (resolve, reject) => {
+            try {
+                const now = new Date();
+                const dateKey = now.toISOString().split('T')[0];
 
-            const now = new Date();
-            const dateKey = now.toISOString().split('T')[0];
+                // Get workstation info first
+                let workstationName = null;
+                let workstationLocation = null;
 
-            const attendanceRecord = {
-                faceId: faceId,
-                name: name,
-                type: 'check-in',
-                timestamp: now.toISOString(),
-                date: dateKey,
-                confidence: confidence,
-                workstationName: null // Will be filled if workstation is set
-            };
-
-            // Get workstation name if available
-            const wsRequest = this.db.transaction(this.workstationStoreName).objectStore(this.workstationStoreName).get('config');
-            wsRequest.onsuccess = () => {
-                if (wsRequest.result) {
-                    attendanceRecord.workstationName = wsRequest.result.name;
-                    attendanceRecord.workstationLocation = wsRequest.result.location;
+                try {
+                    const ws = await this.getWorkstation();
+                    if (ws) {
+                        workstationName = ws.name;
+                        workstationLocation = ws.location;
+                    }
+                } catch (e) {
+                    console.log('No workstation configured');
                 }
+
+                const transaction = this.db.transaction([this.attendanceStoreName, this.activeSessionStoreName], 'readwrite');
+                const attendanceStore = transaction.objectStore(this.attendanceStoreName);
+                const sessionStore = transaction.objectStore(this.activeSessionStoreName);
+
+                const attendanceRecord = {
+                    faceId: faceId,
+                    name: name,
+                    type: 'check-in',
+                    timestamp: now.toISOString(),
+                    date: dateKey,
+                    confidence: confidence,
+                    workstationName: workstationName,
+                    workstationLocation: workstationLocation
+                };
 
                 const addRequest = attendanceStore.add(attendanceRecord);
 
                 addRequest.onsuccess = () => {
                     // Create active session
-                    sessionStore.put({
+                    const sessionRequest = sessionStore.put({
                         faceId: faceId,
                         name: name,
                         checkInTime: now.toISOString(),
                         attendanceId: addRequest.result
                     });
 
-                    resolve(addRequest.result);
+                    sessionRequest.onsuccess = () => {
+                        console.log('Check-in recorded successfully:', name);
+                        resolve(addRequest.result);
+                    };
+
+                    sessionRequest.onerror = () => {
+                        reject(new Error('Failed to create active session'));
+                    };
                 };
 
                 addRequest.onerror = () => {
                     reject(new Error('Failed to record check-in'));
                 };
-            };
 
-            wsRequest.onerror = () => {
-                reject(new Error('Failed to get workstation info'));
-            };
+                transaction.onerror = () => {
+                    reject(new Error('Transaction failed'));
+                };
+            } catch (error) {
+                reject(error);
+            }
         });
     }
 
@@ -368,24 +385,37 @@ class FaceDB {
             await this.open();
         }
 
-        return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction([this.attendanceStoreName, this.activeSessionStoreName], 'readwrite');
-            const attendanceStore = transaction.objectStore(this.attendanceStoreName);
-            const sessionStore = transaction.objectStore(this.activeSessionStoreName);
+        return new Promise(async (resolve, reject) => {
+            try {
+                const now = new Date();
+                const dateKey = now.toISOString().split('T')[0];
 
-            const now = new Date();
-            const dateKey = now.toISOString().split('T')[0];
+                // Get active session first to calculate duration
+                const session = await new Promise((res, rej) => {
+                    const transaction = this.db.transaction(this.activeSessionStoreName, 'readonly');
+                    const request = transaction.objectStore(this.activeSessionStoreName).get(faceId);
+                    request.onsuccess = () => res(request.result);
+                    request.onerror = () => rej(new Error('Failed to get active session'));
+                });
 
-            // First get the active session to calculate duration
-            const sessionRequest = sessionStore.get(faceId);
-
-            sessionRequest.onsuccess = () => {
-                const session = sessionRequest.result;
                 let duration = null;
-
                 if (session) {
                     const checkInTime = new Date(session.checkInTime);
                     duration = Math.round((now - checkInTime) / 1000 / 60); // Duration in minutes
+                }
+
+                // Get workstation info
+                let workstationName = null;
+                let workstationLocation = null;
+
+                try {
+                    const ws = await this.getWorkstation();
+                    if (ws) {
+                        workstationName = ws.name;
+                        workstationLocation = ws.location;
+                    }
+                } catch (e) {
+                    console.log('No workstation configured');
                 }
 
                 const attendanceRecord = {
@@ -396,35 +426,34 @@ class FaceDB {
                     date: dateKey,
                     confidence: confidence,
                     duration: duration,
-                    workstationName: null
+                    workstationName: workstationName,
+                    workstationLocation: workstationLocation
                 };
 
-                // Get workstation name if available
-                const wsRequest = this.db.transaction(this.workstationStoreName).objectStore(this.workstationStoreName).get('config');
-                wsRequest.onsuccess = () => {
-                    if (wsRequest.result) {
-                        attendanceRecord.workstationName = wsRequest.result.name;
-                        attendanceRecord.workstationLocation = wsRequest.result.location;
-                    }
+                const transaction = this.db.transaction([this.attendanceStoreName, this.activeSessionStoreName], 'readwrite');
+                const attendanceStore = transaction.objectStore(this.attendanceStoreName);
+                const sessionStore = transaction.objectStore(this.activeSessionStoreName);
 
-                    const addRequest = attendanceStore.add(attendanceRecord);
+                const addRequest = attendanceStore.add(attendanceRecord);
 
-                    addRequest.onsuccess = () => {
-                        // Remove active session
-                        sessionStore.delete(faceId);
+                addRequest.onsuccess = () => {
+                    // Remove active session
+                    sessionStore.delete(faceId);
 
-                        resolve({ id: addRequest.result, duration: duration });
-                    };
-
-                    addRequest.onerror = () => {
-                        reject(new Error('Failed to record check-out'));
-                    };
+                    console.log('Check-out recorded successfully:', name, 'Duration:', duration);
+                    resolve({ id: addRequest.result, duration: duration });
                 };
-            };
 
-            sessionRequest.onerror = () => {
-                reject(new Error('Failed to get active session'));
-            };
+                addRequest.onerror = () => {
+                    reject(new Error('Failed to record check-out'));
+                };
+
+                transaction.onerror = () => {
+                    reject(new Error('Transaction failed'));
+                };
+            } catch (error) {
+                reject(error);
+            }
         });
     }
 

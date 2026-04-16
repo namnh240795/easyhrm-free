@@ -383,14 +383,24 @@ async function processFaceDetection(detection) {
             await loadRecentActivity();
         } else {
             // Check in
-            await faceDB.recordCheckIn(match.face.id, match.face.name, match.confidence);
+            console.log('Checking in:', match.face.name);
+            updateStatus('loading', `Checking in ${match.face.name}...`);
 
-            console.log('Checked in:', match.face.name);
-            showDetectionResult(match.face.name, 'Checked In', true, 'check-in');
+            try {
+                await faceDB.recordCheckIn(match.face.id, match.face.name, match.confidence);
 
-            // Reload displays
-            await loadActiveSessions();
-            await loadRecentActivity();
+                console.log('Checked in:', match.face.name);
+                showDetectionResult(match.face.name, 'Checked In', true, 'check-in');
+
+                // Reload displays
+                await loadActiveSessions();
+                await loadRecentActivity();
+
+                updateStatus('ready', `✅ ${match.face.name} checked in successfully!`);
+            } catch (error) {
+                console.error('Check-in error:', error);
+                updateStatus('error', `Check-in failed: ${error.message}`);
+            }
         }
 
         // Update last scan info
