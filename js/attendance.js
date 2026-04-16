@@ -5,8 +5,8 @@
 
 // Configuration
 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
-const MATCH_THRESHOLD = 0.6;
-const CONFIDENT_THRESHOLD = 0.4;
+const MATCH_THRESHOLD = 0.5; // More lenient threshold for better matching
+const CONFIDENT_THRESHOLD = 0.3;
 
 // Cooldown period (milliseconds) - prevent duplicate scans
 const SCAN_COOLDOWN = 5000;
@@ -51,6 +51,7 @@ let lastScannedUser = null;
 let lastScanTime = 0;
 let currentFilter = 'all';
 let scanInterval = null;
+let displaySize = null;
 
 /**
  * Initialize the application
@@ -77,6 +78,9 @@ async function init() {
         // Start video stream
         await startVideo();
 
+        // Start face detection loop (always running, but only processes when attendance is active)
+        startFaceDetectionLoop();
+
         // Set up filter buttons
         setupFilters();
     } catch (error) {
@@ -102,9 +106,9 @@ async function loadModels() {
 
         const faceCount = await faceDB.getCount();
         if (faceCount === 0) {
-            updateStatus('error', 'No faces registered! Please register a face first.');
+            updateStatus('error', 'No faces registered! Please <a href="register.html" style="color:inherit;text-decoration:underline;">register a face</a> first.');
         } else {
-            updateStatus('ready', `Ready! ${faceCount} face(s) registered. Click "Start Attendance" to begin.`);
+            updateStatus('ready', `Ready! ${faceCount} face(s) registered. Click "Start Attendance" to begin tracking.`);
         }
     } catch (error) {
         throw new Error('Failed to load models: ' + error.message);
@@ -117,6 +121,7 @@ async function loadModels() {
 async function loadRegisteredFaces() {
     try {
         registeredFaces = await faceDB.getAllFaces();
+        console.log('Loaded registered faces:', registeredFaces.length);
     } catch (error) {
         console.error('Error loading registered faces:', error);
     }
@@ -233,47 +238,54 @@ async function startVideo() {
             }
         });
         video.srcObject = stream;
+
+        // Wait for video to be ready
+        return new Promise((resolve) => {
+            video.onloadedmetadata = () => {
+                displaySize = { width: video.videoWidth, height: video.videoHeight };
+                faceapi.matchDimensions(canvas, displaySize);
+                video.play();
+                resolve();
+            };
+        });
     } catch (error) {
         throw new Error('Unable to access camera. Please grant permission.');
     }
 }
 
 /**
- * Start continuous face detection
+ * Start continuous face detection loop (always runs)
  */
-function startFaceDetection() {
+function startFaceDetectionLoop() {
     isDetecting = true;
 
-    video.addEventListener('play', () => {
-        const displaySize = { width: video.videoWidth, height: video.videoHeight };
-        faceapi.matchDimensions(canvas, displaySize);
+    scanInterval = setInterval(async () => {
+        if (!isDetecting || video.paused || video.ended) return;
 
-        scanInterval = setInterval(async () => {
-            if (!isDetecting || video.paused || video.ended) return;
+        // Detect faces
+        const detections = await faceapi
+            .detectAllFaces(video)
+            .withFaceLandmarks()
+            .withFaceDescriptors();
 
-            // Detect faces
-            const detections = await faceapi
-                .detectAllFaces(video)
-                .withFaceLandmarks()
-                .withFaceDescriptors();
+        // Resize detections to match video display size
+        const resizedDetections = faceapi.resizeResults(detections, displaySize);
 
-            // Resize detections to match video display size
-            const resizedDetections = faceapi.resizeResults(detections, displaySize);
+        // Clear canvas and draw detections
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Clear canvas and draw detections
-            const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Draw face boxes and landmarks
+        faceapi.draw.drawDetections(canvas, resizedDetections);
+        faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
 
-            // Draw face boxes and landmarks
-            faceapi.draw.drawDetections(canvas, resizedDetections);
-            faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
+        // Process detected faces for attendance (only when active)
+        if (isAttendanceActive && detections.length > 0) {
+            await processFaceDetection(detections[0]);
+        }
+    }, 500); // Scan every 500ms
 
-            // Process detected faces for attendance
-            if (isAttendanceActive && detections.length > 0) {
-                await processFaceDetection(detections[0]);
-            }
-        }, 500); // Scan every 500ms
-    });
+    console.log('Face detection loop started');
 }
 
 /**
@@ -284,26 +296,34 @@ async function processFaceDetection(detection) {
 
     // Check cooldown
     if (lastScannedUser && now - lastScanTime < SCAN_COOLDOWN) {
+        console.log('Cooldown active, skipping scan');
         return;
     }
+
+    console.log('Processing face detection...');
 
     const descriptor = detection.descriptor;
     const match = findMatch(descriptor);
 
     if (match) {
+        console.log('Face matched:', match.face.name, 'Confidence:', match.confidence);
+
         // Check if within working hours (unless in test mode)
         if (!isWithinWorkingHours() && !testMode) {
+            console.log('Outside working hours, skipping');
             showDetectionResult(match.face.name, 'Outside working hours', false);
             return;
         }
 
         // Check if user is currently checked in
         const isCheckedIn = await faceDB.isCheckedIn(match.face.id);
+        console.log('User checked in:', isCheckedIn);
 
         if (isCheckedIn) {
             // Check out
             const result = await faceDB.recordCheckOut(match.face.id, match.face.name, match.confidence);
 
+            console.log('Checked out:', match.face.name, 'Duration:', result.duration);
             showDetectionResult(match.face.name, 'Checked Out', true, 'check-out', result.duration);
 
             // Reload displays
@@ -313,6 +333,7 @@ async function processFaceDetection(detection) {
             // Check in
             await faceDB.recordCheckIn(match.face.id, match.face.name, match.confidence);
 
+            console.log('Checked in:', match.face.name);
             showDetectionResult(match.face.name, 'Checked In', true, 'check-in');
 
             // Reload displays
@@ -323,6 +344,8 @@ async function processFaceDetection(detection) {
         // Update last scan info
         lastScannedUser = match.face.id;
         lastScanTime = now;
+    } else {
+        console.log('No face match found');
     }
 }
 
@@ -331,6 +354,7 @@ async function processFaceDetection(detection) {
  */
 function findMatch(descriptor) {
     if (registeredFaces.length === 0) {
+        console.log('No registered faces to match against');
         return null;
     }
 
@@ -344,6 +368,8 @@ function findMatch(descriptor) {
             bestMatch = face;
         }
     }
+
+    console.log('Best match distance:', bestDistance, 'Threshold:', MATCH_THRESHOLD);
 
     // Check if the best match is within threshold
     if (bestDistance <= MATCH_THRESHOLD) {
@@ -387,6 +413,8 @@ function showDetectionResult(name, action, matched, type = '', duration = null) 
     } else {
         detectionTimeEl.textContent = timeStr;
     }
+
+    console.log('Showing detection result:', name, action);
 
     // Auto-hide after 3 seconds
     setTimeout(() => {
@@ -432,6 +460,8 @@ async function loadActiveSessions() {
                 </div>
             `;
         }).join('');
+
+        console.log('Loaded active sessions:', sessions.length);
     } catch (error) {
         console.error('Error loading active sessions:', error);
     }
@@ -473,6 +503,8 @@ async function loadRecentActivity() {
                 </div>
             `;
         }).join('');
+
+        console.log('Loaded recent activity:', records.length);
     } catch (error) {
         console.error('Error loading recent activity:', error);
     }
@@ -502,19 +534,14 @@ function toggleAttendance() {
         toggleAttendanceBtn.textContent = 'Stop Attendance';
         toggleAttendanceBtn.classList.remove('btn-primary');
         toggleAttendanceBtn.classList.add('btn-danger');
-        updateStatus('ready', 'Attendance tracking active. Look at the camera to check in/out.');
-        startFaceDetection();
+        updateStatus('ready', '🎥 Attendance tracking ACTIVE! Look at the camera to check in/out.');
+        console.log('Attendance tracking started');
     } else {
         toggleAttendanceBtn.textContent = 'Start Attendance';
         toggleAttendanceBtn.classList.remove('btn-danger');
         toggleAttendanceBtn.classList.add('btn-primary');
-        updateStatus('ready', 'Attendance tracking paused. Click "Start Attendance" to begin.');
-
-        if (scanInterval) {
-            clearInterval(scanInterval);
-            scanInterval = null;
-        }
-        isDetecting = false;
+        updateStatus('ready', `⏸️ Attendance tracking paused. ${registeredFaces.length} face(s) registered.`);
+        console.log('Attendance tracking stopped');
     }
 }
 
@@ -528,11 +555,13 @@ function toggleTestMode() {
     if (testMode) {
         testModeBtn.classList.remove('btn-secondary');
         testModeBtn.classList.add('btn-primary');
-        updateStatus('ready', 'Test mode enabled! Attendance will work outside working hours.');
+        updateStatus('ready', '🧪 Test mode enabled! Attendance will work outside working hours.');
+        console.log('Test mode enabled');
     } else {
         testModeBtn.classList.remove('btn-primary');
         testModeBtn.classList.add('btn-secondary');
         updateWorkingHoursStatus();
+        console.log('Test mode disabled');
     }
 }
 
@@ -549,6 +578,7 @@ async function clearAttendance() {
         await loadActiveSessions();
         await loadRecentActivity();
         alert('All attendance records cleared!');
+        console.log('Attendance records cleared');
     } catch (error) {
         alert('Error clearing attendance: ' + error.message);
     }
@@ -559,7 +589,7 @@ async function clearAttendance() {
  */
 function updateStatus(type, message) {
     statusEl.className = `status ${type}`;
-    statusText.textContent = message;
+    statusEl.innerHTML = `<span class="status-dot"></span><span>${message}</span>`;
 }
 
 /**

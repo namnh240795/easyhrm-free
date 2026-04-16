@@ -5,7 +5,8 @@
 
 // Configuration
 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
-const MATCH_THRESHOLD = 0.6;
+const MATCH_THRESHOLD = 0.5; // More lenient threshold for better matching
+const CONFIDENT_THRESHOLD = 0.3;
 
 // DOM Elements
 const video = document.getElementById('video');
