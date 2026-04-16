@@ -7,6 +7,7 @@ class FaceDB {
     constructor() {
         this.dbName = 'FaceRecognitionDB';
         this.storeName = 'registeredFaces';
+        this.workstationStoreName = 'workstation';
         this.db = null;
     }
 
@@ -39,6 +40,11 @@ class FaceDB {
                     // Create indexes for searching
                     objectStore.createIndex('name', 'name', { unique: false });
                     objectStore.createIndex('createdAt', 'createdAt', { unique: false });
+                }
+
+                // Create object store for workstation (single record with key 'config')
+                if (!db.objectStoreNames.contains(this.workstationStoreName)) {
+                    db.createObjectStore(this.workstationStoreName, { keyPath: 'id' });
                 }
             };
         });
@@ -172,6 +178,95 @@ class FaceDB {
                 reject(new Error('Failed to count faces in database'));
             };
         });
+    }
+
+    // ==================== Workstation Methods ====================
+
+    /**
+     * Save or update workstation configuration
+     * @param {Object} workstationData - Workstation configuration
+     */
+    async saveWorkstation(workstationData) {
+        if (!this.db) {
+            await this.open();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction([this.workstationStoreName], 'readwrite');
+            const objectStore = transaction.objectStore(this.workstationStoreName);
+
+            const data = {
+                id: 'config',
+                ...workstationData,
+                updatedAt: new Date().toISOString()
+            };
+
+            const request = objectStore.put(data);
+
+            request.onsuccess = () => {
+                resolve(data);
+            };
+
+            request.onerror = () => {
+                reject(new Error('Failed to save workstation configuration'));
+            };
+        });
+    }
+
+    /**
+     * Get workstation configuration
+     * @returns {Object|null} Workstation configuration or null if not set
+     */
+    async getWorkstation() {
+        if (!this.db) {
+            await this.open();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction([this.workstationStoreName], 'readonly');
+            const objectStore = transaction.objectStore(this.workstationStoreName);
+            const request = objectStore.get('config');
+
+            request.onsuccess = () => {
+                resolve(request.result || null);
+            };
+
+            request.onerror = () => {
+                reject(new Error('Failed to get workstation configuration'));
+            };
+        });
+    }
+
+    /**
+     * Delete workstation configuration
+     */
+    async deleteWorkstation() {
+        if (!this.db) {
+            await this.open();
+        }
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction([this.workstationStoreName], 'readwrite');
+            const objectStore = transaction.objectStore(this.workstationStoreName);
+            const request = objectStore.delete('config');
+
+            request.onsuccess = () => {
+                resolve(true);
+            };
+
+            request.onerror = () => {
+                reject(new Error('Failed to delete workstation configuration'));
+            };
+        });
+    }
+
+    /**
+     * Check if workstation is configured
+     * @returns {boolean} True if workstation is configured
+     */
+    async isWorkstationConfigured() {
+        const ws = await this.getWorkstation();
+        return ws !== null;
     }
 }
 

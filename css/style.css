@@ -461,6 +461,11 @@ body {
     color: var(--text-primary);
 }
 
+.nav a.active {
+    background: var(--primary-color);
+    color: white;
+}
+
 /* Responsive */
 @media (max-width: 640px) {
     .container {

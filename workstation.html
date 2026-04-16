@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workstation Setup - Face Recognition System</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .workstation-form {
+            max-width: 640px;
+            margin: 0 auto;
+            background: var(--card-bg);
+            border-radius: 1rem;
+            padding: 2rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            font-family: inherit;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        .form-hint {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+
+        .current-workstation {
+            max-width: 640px;
+            margin: 2rem auto;
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+        }
+
+        .current-workstation h3 {
+            color: #166534;
+            margin-bottom: 1rem;
+        }
+
+        .workstation-info {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+        }
+
+        .info-item {
+            background: white;
+            padding: 0.75rem;
+            border-radius: 0.25rem;
+        }
+
+        .info-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .info-value {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-top: 0.25rem;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 1rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .status-badge.active {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .status-badge.inactive {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .btn-danger {
+            background: var(--error-color);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .actions {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        .schedule-section {
+            margin-top: 2rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .schedule-section h3 {
+            margin-bottom: 1rem;
+            font-size: 1.25rem;
+        }
+
+        .schedule-grid {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .schedule-day {
+            display: grid;
+            grid-template-columns: auto 1fr 1fr auto;
+            gap: 0.75rem;
+            align-items: center;
+            padding: 0.75rem;
+            background: #f9fafb;
+            border-radius: 0.5rem;
+        }
+
+        .schedule-day.disabled {
+            opacity: 0.5;
+        }
+
+        .day-checkbox {
+            width: 1.25rem;
+            height: 1.25rem;
+            cursor: pointer;
+        }
+
+        .day-name {
+            font-weight: 600;
+            min-width: 100px;
+        }
+
+        .time-input {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.25rem;
+            font-size: 0.9rem;
+        }
+
+        .time-input:disabled {
+            background: #e5e7eb;
+            cursor: not-allowed;
+        }
+
+        .schedule-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .btn-sm {
+            padding: 0.35rem 0.75rem;
+            font-size: 0.85rem;
+        }
+
+        .copy-all-btn {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 0.25rem;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+
+        .copy-all-btn:hover {
+            background: var(--primary-hover);
+        }
+
+        @media (max-width: 640px) {
+            .schedule-day {
+                grid-template-columns: auto 1fr;
+                gap: 0.5rem;
+            }
+
+            .schedule-day > *:not(.day-checkbox):not(.day-name) {
+                grid-column: 2;
+            }
+
+            .schedule-actions {
+                justify-content: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <nav class="nav">
+            <a href="index.html">Home</a>
+            <a href="workstation.html" class="active">Workstation</a>
+            <a href="register.html">Register</a>
+            <a href="validate.html">Validate</a>
+        </nav>
+
+        <header class="header">
+            <h1>Workstation Setup</h1>
+            <p class="subtitle">Configure your workstation for face recognition</p>
+        </header>
+
+        <div id="current-workstation" class="current-workstation" style="display: none;">
+            <h3>Current Workstation</h3>
+            <div class="workstation-info">
+                <div class="info-item">
+                    <div class="info-label">Workstation Name</div>
+                    <div class="info-value" id="ws-name">-</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Location</div>
+                    <div class="info-value" id="ws-location">-</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Department</div>
+                    <div class="info-value" id="ws-department">-</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Type</div>
+                    <div class="info-value" id="ws-type">-</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Status</div>
+                    <div class="info-value"><span id="ws-status" class="status-badge">-</span></div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Last Updated</div>
+                    <div class="info-value" id="ws-updated">-</div>
+                </div>
+            </div>
+            <div class="actions">
+                <button id="edit-btn" class="btn btn-secondary">Edit Configuration</button>
+                <button id="delete-btn" class="btn btn-danger">Delete Configuration</button>
+            </div>
+        </div>
+
+        <div id="workstation-form" class="workstation-form">
+            <h2 id="form-title">Setup Workstation</h2>
+            <p id="form-subtitle" class="form-hint" style="margin-bottom: 1.5rem;">Configure your workstation details</p>
+
+            <form id="ws-form">
+                <div class="form-group">
+                    <label for="ws-name-input">Workstation Name *</label>
+                    <input type="text" id="ws-name-input" required placeholder="e.g., Front Desk Kiosk">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="ws-location-input">Location *</label>
+                        <input type="text" id="ws-location-input" required placeholder="e.g., Building A, Floor 1">
+                    </div>
+                    <div class="form-group">
+                        <label for="ws-department-input">Department</label>
+                        <input type="text" id="ws-department-input" placeholder="e.g., Reception">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="ws-type-input">Workstation Type</label>
+                        <select id="ws-type-input">
+                            <option value="">Select type...</option>
+                            <option value="kiosk">Self-Service Kiosk</option>
+                            <option value="reception">Reception Desk</option>
+                            <option value="security">Security Gate</option>
+                            <option value="office">Office Station</option>
+                            <option value="mobile">Mobile Device</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="ws-status-input">Status</label>
+                        <select id="ws-status-input">
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                            <option value="maintenance">Maintenance</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="ws-code-input">Workstation Code</label>
+                    <input type="text" id="ws-code-input" placeholder="Optional unique identifier">
+                    <div class="form-hint">A unique code for identifying this workstation</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="ws-notes-input">Notes</label>
+                    <textarea id="ws-notes-input" placeholder="Additional notes or instructions..."></textarea>
+                </div>
+
+                <div class="schedule-section">
+                    <h3>Working Hours Schedule</h3>
+                    <p class="form-hint">Configure the working hours for each day of the week</p>
+
+                    <div class="schedule-actions" style="margin-top: 1rem;">
+                        <button type="button" class="copy-all-btn" id="copy-monday-btn">Apply Monday to All Days</button>
+                        <button type="button" class="copy-all-btn" id="copy-weekdays-btn">Apply to Weekdays Only</button>
+                    </div>
+
+                    <div class="schedule-grid" id="schedule-grid">
+                        <!-- Schedule items will be generated by JavaScript -->
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <button type="submit" class="btn btn-primary" id="save-btn">Save Configuration</button>
+                    <button type="button" class="btn btn-secondary" id="cancel-btn" style="display: none;">Cancel</button>
+                </div>
+            </form>
+        </div>
+
+        <footer class="footer">
+            <p>Powered by face-api.js | Pure client-side face recognition</p>
+        </footer>
+    </div>
+
+    <script src="js/db.js"></script>
+    <script src="js/workstation.js"></script>
+</body>
+</html>
