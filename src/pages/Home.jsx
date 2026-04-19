@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
 
 function Home() {
+  console.log('Home component rendering');
+
   const features = [
     {
       title: 'Workstation',

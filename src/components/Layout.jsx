@@ -3,6 +3,8 @@ import { cn } from '../lib/utils';
 
 function Layout() {
   const location = useLocation();
+  console.log('Layout rendering, current path:', location.pathname);
+  console.log('Outlet component:', Outlet);
 
   const navigation = [
     { name: 'Home', href: '/', icon: '🏠' },
