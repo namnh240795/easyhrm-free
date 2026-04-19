@@ -2,6 +2,7 @@
 node_modules/
 package-lock.json
 yarn.lock
+pnpm-lock.yaml
 
 # Build outputs
 dist/
@@ -32,3 +33,8 @@ npm-debug.log*
 # Local testing
 .cache/
 temp/
+
+# Test results
+test-results/
+playwright-report/
+playwright/.cache/
