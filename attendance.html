@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Attendance Tracking - Face Recognition System</title>
     <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="/src/styles.css">
     <style>
         .attendance-layout {
             display: grid;
@@ -385,6 +386,9 @@
                         <div><strong>Threshold:</strong> <span id="debug-threshold">0.5</span></div>
                         <div><strong>Attendance Active:</strong> <span id="debug-active">No</span></div>
                         <div><strong>Test Mode:</strong> <span id="debug-test">No</span></div>
+                        <div><strong>Motion Detection:</strong> <span id="debug-motion">Yes</span></div>
+                        <div><strong>Current Zone:</strong> <span id="debug-zone">-</span></div>
+                        <div><strong>Movement:</strong> <span id="debug-movement">-</span></div>
                         <div><strong>Within Hours:</strong> <span id="debug-hours">-</span></div>
                     </div>
                 </div>
@@ -392,6 +396,7 @@
                 <div class="controls">
                     <button id="toggle-attendance-btn" class="btn btn-primary">Start Attendance</button>
                     <button id="test-mode-btn" class="btn btn-secondary">Test Mode: Off</button>
+                    <button id="motion-detection-btn" class="btn btn-secondary">Motion: On</button>
                     <button id="reset-db-btn" class="btn btn-danger" style="font-size: 0.85rem;">Reset Database</button>
                 </div>
             </div>

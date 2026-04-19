@@ -11,6 +11,16 @@ const CONFIDENT_THRESHOLD = 0.3;
 // Cooldown period (milliseconds) - prevent duplicate scans
 const SCAN_COOLDOWN = 5000;
 
+// Zone-based motion detection configuration
+const ZONES = {
+    LEFT: { name: 'left', min: 0, max: 0.3 },
+    MIDDLE: { name: 'middle', min: 0.3, max: 0.7 },
+    RIGHT: { name: 'right', min: 0.7, max: 1.0 }
+};
+
+// Minimum movement distance (as percentage of frame width)
+const MIN_MOVEMENT_DISTANCE = 0.3;
+
 // Days of week for schedule checking
 const DAYS_OF_WEEK = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
@@ -34,6 +44,7 @@ const wsHoursDisplayEl = document.getElementById('ws-hours-display');
 const systemStatusEl = document.getElementById('system-status');
 const toggleAttendanceBtn = document.getElementById('toggle-attendance-btn');
 const testModeBtn = document.getElementById('test-mode-btn');
+const motionDetectionBtn = document.getElementById('motion-detection-btn');
 const clearAttendanceBtn = document.getElementById('clear-attendance-btn');
 const resetDbBtn = document.getElementById('reset-db-btn');
 const filterBtns = document.querySelectorAll('.filter-btn');
@@ -46,6 +57,9 @@ const debugDistanceEl = document.getElementById('debug-distance');
 const debugThresholdEl = document.getElementById('debug-threshold');
 const debugActiveEl = document.getElementById('debug-active');
 const debugTestEl = document.getElementById('debug-test');
+const debugMotionEl = document.getElementById('debug-motion');
+const debugZoneEl = document.getElementById('debug-zone');
+const debugMovementEl = document.getElementById('debug-movement');
 const debugHoursEl = document.getElementById('debug-hours');
 
 // State
@@ -63,6 +77,10 @@ let lastScanTime = 0;
 let currentFilter = 'all';
 let scanInterval = null;
 let displaySize = null;
+
+// Motion detection state
+let faceTracking = {}; // Track face positions by ID: { faceId: { zone, positions, lastZoneChange } }
+let isMotionDetectionEnabled = true; // Can be toggled
 
 /**
  * Initialize the application
@@ -276,6 +294,9 @@ function startFaceDetectionLoop() {
     scanInterval = setInterval(async () => {
         if (!isDetecting || video.paused || video.ended) return;
 
+        // Clean old movement history periodically
+        cleanOldMovementHistory();
+
         // Detect faces
         const detections = await faceapi
             .detectAllFaces(video)
@@ -289,6 +310,9 @@ function startFaceDetectionLoop() {
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+        // Draw zones
+        drawZones(ctx);
+
         // Draw face boxes and landmarks
         faceapi.draw.drawDetections(canvas, resizedDetections);
         faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
@@ -298,11 +322,41 @@ function startFaceDetectionLoop() {
 
         // Process detected faces for attendance (only when active)
         if (isAttendanceActive && detections.length > 0) {
-            await processFaceDetection(detections[0]);
+            await processFaceDetectionWithMotion(detections);
         }
     }, 500); // Scan every 500ms
 
     console.log('Face detection loop started');
+}
+
+/**
+ * Draw zone indicators on canvas
+ */
+function drawZones(ctx) {
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Draw left zone (0-30%)
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
+    ctx.fillRect(0, 0, width * ZONES.LEFT.max, height);
+    ctx.strokeStyle = 'rgba(59, 130, 246, 0.3)';
+    ctx.setLineDash([5, 5]);
+    ctx.lineWidth = 2;
+    ctx.strokeRect(0, 0, width * ZONES.LEFT.max, height);
+
+    // Draw right zone (70-100%)
+    ctx.fillStyle = 'rgba(16, 185, 129, 0.1)';
+    ctx.fillRect(width * ZONES.RIGHT.min, 0, width * (1 - ZONES.RIGHT.min), height);
+    ctx.strokeStyle = 'rgba(16, 185, 129, 0.3)';
+    ctx.strokeRect(width * ZONES.RIGHT.min, 0, width * (1 - ZONES.RIGHT.min), height);
+
+    // Draw zone labels
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.font = '14px sans-serif';
+    ctx.fillText('← CHECK-IN', 10, 20);
+    ctx.fillText('CHECK-OUT →', width - 100, 20);
+
+    ctx.setLineDash([]); // Reset line dash
 }
 
 /**
@@ -318,16 +372,26 @@ function updateDebugInfo(detections) {
             debugMatchEl.textContent = match.face.name;
             debugMatchEl.style.color = match.distance < 0.4 ? '#10b981' : match.distance < 0.5 ? '#f59e0b' : '#ef4444';
             debugDistanceEl.textContent = match.distance.toFixed(4);
+
+            // Show zone information
+            const faceCenterX = getFaceCenterX(detections[0]);
+            const currentZone = getZoneForPosition(faceCenterX);
+            debugZoneEl.textContent = `${currentZone} (${(faceCenterX * 100).toFixed(0)}%)`;
+            debugZoneEl.style.color = currentZone === 'left' ? '#3b82f6' : currentZone === 'right' ? '#10b981' : 'inherit';
         } else {
             debugMatchEl.textContent = 'No match';
             debugMatchEl.style.color = '#ef4444';
             debugDistanceEl.textContent = '-';
+            debugZoneEl.textContent = '-';
         }
     } else {
         debugMatchEl.textContent = 'None';
         debugMatchEl.style.color = 'inherit';
         debugDistanceEl.textContent = '-';
+        debugZoneEl.textContent = '-';
     }
+
+    debugMovementEl.textContent = Object.keys(faceTracking).length > 0 ? 'Tracking' : '-';
 }
 
 /**
@@ -337,11 +401,120 @@ function updateDebugPanel() {
     debugThresholdEl.textContent = MATCH_THRESHOLD.toString();
     debugActiveEl.textContent = isAttendanceActive ? 'Yes' : 'No';
     debugTestEl.textContent = testMode ? 'Yes' : 'No';
+    debugMotionEl.textContent = isMotionDetectionEnabled ? 'Yes' : 'No';
     debugHoursEl.textContent = isWithinWorkingHours() ? 'Yes' : 'No';
 }
 
 /**
- * Process a detected face for attendance
+ * Process detected faces for attendance with motion detection
+ */
+async function processFaceDetectionWithMotion(detections) {
+    const now = Date.now();
+
+    // Check cooldown
+    if (lastScannedUser && now - lastScanTime < SCAN_COOLDOWN) {
+        console.log('Cooldown active, skipping scan');
+        return;
+    }
+
+    for (const detection of detections) {
+        // Get face center position
+        const faceCenterX = getFaceCenterX(detection);
+        const currentZone = getZoneForPosition(faceCenterX);
+
+        // Find matching face
+        const match = findMatch(detection.descriptor);
+        if (!match) continue;
+
+        console.log('Face matched:', match.face.name, 'Zone:', currentZone, 'Position:', faceCenterX.toFixed(2));
+
+        // Initialize tracking for this face
+        initializeFaceTracking(match.face.id);
+
+        // Detect zone transition
+        const direction = detectZoneTransition(match.face.id, currentZone);
+
+        if (direction && isMotionDetectionEnabled) {
+            console.log('Motion detected:', direction);
+
+            // Check if within working hours (unless in test mode)
+            if (!isWithinWorkingHours() && !testMode) {
+                console.log('Outside working hours, skipping');
+                showDetectionResult(match.face.name, 'Outside working hours', false);
+                continue;
+            }
+
+            // Process based on direction
+            if (direction === 'left-to-right') {
+                // Check-in
+                const isCheckedIn = await faceDB.isCheckedIn(match.face.id);
+                if (!isCheckedIn) {
+                    await performCheckIn(match, direction, currentZone);
+                } else {
+                    console.log('User already checked in');
+                }
+            } else if (direction === 'right-to-left') {
+                // Check-out
+                const isCheckedIn = await faceDB.isCheckedIn(match.face.id);
+                if (isCheckedIn) {
+                    await performCheckOut(match, direction, currentZone);
+                } else {
+                    console.log('User not checked in');
+                }
+            }
+
+            // Update last scan info
+            lastScannedUser = match.face.id;
+            lastScanTime = now;
+            break; // Only process one detection per cycle
+        }
+    }
+}
+
+/**
+ * Perform check-in with motion data
+ */
+async function performCheckIn(match, direction, zone) {
+    console.log('Checking in:', match.face.name, 'Motion:', direction);
+    updateStatus('loading', `Checking in ${match.face.name}...`);
+
+    try {
+        await faceDB.recordCheckIn(match.face.id, match.face.name, match.confidence);
+
+        console.log('Checked in:', match.face.name);
+        showDetectionResult(match.face.name, 'Checked In (Motion)', true, 'check-in');
+
+        // Reload displays
+        await loadActiveSessions();
+        await loadRecentActivity();
+
+        updateStatus('ready', `✅ ${match.face.name} checked in successfully via ${direction} motion!`);
+    } catch (error) {
+        console.error('Check-in error:', error);
+        updateStatus('error', `Check-in failed: ${error.message}`);
+    }
+}
+
+/**
+ * Perform check-out with motion data
+ */
+async function performCheckOut(match, direction, zone) {
+    console.log('Checking out:', match.face.name, 'Motion:', direction);
+
+    const result = await faceDB.recordCheckOut(match.face.id, match.face.name, match.confidence);
+
+    console.log('Checked out:', match.face.name, 'Duration:', result.duration);
+    showDetectionResult(match.face.name, 'Checked Out (Motion)', true, 'check-out', result.duration);
+
+    // Reload displays
+    await loadActiveSessions();
+    await loadRecentActivity();
+
+    updateStatus('ready', `✅ ${match.face.name} checked out successfully via ${direction} motion!`);
+}
+
+/**
+ * Process a detected face for attendance (legacy mode, without motion)
  */
 async function processFaceDetection(detection) {
     const now = Date.now();
@@ -453,6 +626,100 @@ function euclideanDistance(descriptor1, descriptor2) {
     return Math.sqrt(
         descriptor1.reduce((sum, val, i) => sum + Math.pow(val - descriptor2[i], 2), 0)
     );
+}
+
+/**
+ * Get zone for a given X position (0-1)
+ */
+function getZoneForPosition(x) {
+    if (x < ZONES.MIDDLE.min) return ZONES.LEFT.name;
+    if (x < ZONES.RIGHT.min) return ZONES.MIDDLE.name;
+    return ZONES.RIGHT.name;
+}
+
+/**
+ * Get face center X position (0-1)
+ */
+function getFaceCenterX(detection) {
+    const box = detection.detection.box;
+    return (box.x + box.width / 2) / displaySize.width;
+}
+
+/**
+ * Initialize tracking for a face
+ */
+function initializeFaceTracking(faceId) {
+    if (!faceTracking[faceId]) {
+        faceTracking[faceId] = {
+            zone: null,
+            positions: [],
+            lastZoneChange: null,
+            movementHistory: []
+        };
+    }
+}
+
+/**
+ * Detect zone transition and determine direction
+ */
+function detectZoneTransition(faceId, currentZone) {
+    const tracking = faceTracking[faceId];
+    if (!tracking || !tracking.zone) {
+        tracking.zone = currentZone;
+        tracking.lastZoneChange = Date.now();
+        return null;
+    }
+
+    const previousZone = tracking.zone;
+    if (previousZone === currentZone) {
+        return null; // No zone change
+    }
+
+    // Detect zone transition
+    let direction = null;
+
+    // Left to Right transition (through Middle) = Check-in
+    if (previousZone === ZONES.LEFT.name && currentZone === ZONES.MIDDLE.name) {
+        tracking.movementHistory.push({ from: previousZone, to: currentZone, time: Date.now() });
+        direction = 'left-to-right';
+    } else if (previousZone === ZONES.MIDDLE.name && currentZone === ZONES.RIGHT.name) {
+        // Check if we came from left
+        const lastMovement = tracking.movementHistory[tracking.movementHistory.length - 1];
+        if (lastMovement && lastMovement.from === ZONES.LEFT.name && lastMovement.to === ZONES.MIDDLE.name) {
+            // Complete left-to-right transition
+            direction = 'left-to-right';
+            tracking.movementHistory = []; // Clear history after complete transition
+        }
+    }
+    // Right to Left transition (through Middle) = Check-out
+    else if (previousZone === ZONES.RIGHT.name && currentZone === ZONES.MIDDLE.name) {
+        tracking.movementHistory.push({ from: previousZone, to: currentZone, time: Date.now() });
+        direction = 'right-to-left';
+    } else if (previousZone === ZONES.MIDDLE.name && currentZone === ZONES.LEFT.name) {
+        // Check if we came from right
+        const lastMovement = tracking.movementHistory[tracking.movementHistory.length - 1];
+        if (lastMovement && lastMovement.from === ZONES.RIGHT.name && lastMovement.to === ZONES.MIDDLE.name) {
+            // Complete right-to-left transition
+            direction = 'right-to-left';
+            tracking.movementHistory = []; // Clear history after complete transition
+        }
+    }
+
+    tracking.zone = currentZone;
+    tracking.lastZoneChange = Date.now();
+
+    return direction;
+}
+
+/**
+ * Clear movement history if too old (more than 2 seconds)
+ */
+function cleanOldMovementHistory() {
+    const now = Date.now();
+    for (const faceId in faceTracking) {
+        const tracking = faceTracking[faceId];
+        tracking.movementHistory = tracking.movementHistory.filter(m => now - m.time < 2000);
+    }
 }
 
 /**
@@ -634,6 +901,30 @@ function toggleTestMode() {
 }
 
 /**
+ * Toggle motion detection
+ */
+function toggleMotionDetection() {
+    isMotionDetectionEnabled = !isMotionDetectionEnabled;
+    motionDetectionBtn.textContent = `Motion: ${isMotionDetectionEnabled ? 'On' : 'Off'}`;
+
+    if (isMotionDetectionEnabled) {
+        motionDetectionBtn.classList.remove('btn-secondary');
+        motionDetectionBtn.classList.add('btn-primary');
+        updateStatus('ready', '🎯 Motion detection enabled! Walk left→right to check in, right→left to check out.');
+        debugMotionEl.textContent = 'Yes';
+        console.log('Motion detection enabled');
+    } else {
+        motionDetectionBtn.classList.remove('btn-primary');
+        motionDetectionBtn.classList.add('btn-secondary');
+        updateStatus('ready', '⏸️ Motion detection disabled. Using standard face detection mode.');
+        debugMotionEl.textContent = 'No';
+        console.log('Motion detection disabled');
+    }
+
+    updateDebugPanel();
+}
+
+/**
  * Clear all attendance records
  */
 async function clearAttendance() {
@@ -708,6 +999,7 @@ function escapeHtml(text) {
 // Event Listeners
 toggleAttendanceBtn.addEventListener('click', toggleAttendance);
 testModeBtn.addEventListener('click', toggleTestMode);
+motionDetectionBtn.addEventListener('click', toggleMotionDetection);
 clearAttendanceBtn.addEventListener('click', clearAttendance);
 resetDbBtn.addEventListener('click', resetDatabase);
 

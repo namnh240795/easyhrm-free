@@ -337,7 +337,10 @@ class FaceDB {
                     date: dateKey,
                     confidence: confidence,
                     workstationName: workstationName,
-                    workstationLocation: workstationLocation
+                    workstationLocation: workstationLocation,
+                    detectionMethod: 'face',
+                    movementDirection: null,
+                    zoneTransition: null
                 };
 
                 const addRequest = attendanceStore.add(attendanceRecord);
@@ -427,7 +430,10 @@ class FaceDB {
                     confidence: confidence,
                     duration: duration,
                     workstationName: workstationName,
-                    workstationLocation: workstationLocation
+                    workstationLocation: workstationLocation,
+                    detectionMethod: 'face',
+                    movementDirection: null,
+                    zoneTransition: null
                 };
 
                 const transaction = this.db.transaction([this.attendanceStoreName, this.activeSessionStoreName], 'readwrite');
