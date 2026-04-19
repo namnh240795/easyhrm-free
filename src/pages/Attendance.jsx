@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useFaceDB } from '../hooks/useFaceDB';
-import * as faceapi from '@vladmandic/face-api';
+
+// Use global faceapi loaded from CDN
 
 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
 const MATCH_THRESHOLD = 0.5;
