@@ -14,6 +14,13 @@ function Register() {
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [name, setName] = useState('');
   const [isCapturing, setIsCapturing] = useState(false);
+  const isCapturingRef = useRef(false);
+
+  // Update ref when state changes
+  useEffect(() => {
+    isCapturingRef.current = isCapturing;
+    console.log('isCapturing state changed to:', isCapturing);
+  }, [isCapturing]);
   const [registeredFaces, setRegisteredFaces] = useState([]);
   const [currentDescriptor, setCurrentDescriptor] = useState(null);
   const [duplicateCheck, setDuplicateCheck] = useState(null);
@@ -22,15 +29,17 @@ function Register() {
   // Load models
   useEffect(() => {
     async function loadModels() {
+      console.log('Loading face-api models...');
       try {
         await Promise.all([
           faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
           faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
           faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
         ]);
+        console.log('✅ Models loaded successfully');
         setModelsLoaded(true);
       } catch (error) {
-        console.error('Failed to load models:', error);
+        console.error('❌ Failed to load models:', error);
       }
     }
     loadModels();
@@ -57,7 +66,11 @@ function Register() {
     async function startVideo() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
+          video: {
+            width: { ideal: 1920, min: 1280 },
+            height: { ideal: 1080, min: 720 },
+            facingMode: 'user'
+          }
         });
         videoRef.current.srcObject = stream;
 
@@ -77,7 +90,7 @@ function Register() {
         videoRef.current.srcObject.getTracks().forEach(track => track.stop());
       }
     };
-  }, [modelsLoaded]);
+  }, [modelsLoaded, isCapturing]); // Added isCapturing dependency
 
   function startFaceDetection() {
     const video = videoRef.current;
@@ -92,7 +105,7 @@ function Register() {
       if (video.paused || video.ended) return;
 
       const detections = await faceapi
-        .detectAllFaces(video)
+        .detectAllFaces(video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3, maxResults: 10 }))
         .withFaceLandmarks()
         .withFaceDescriptors();
 
@@ -103,9 +116,14 @@ function Register() {
       faceapi.draw.drawDetections(canvas, resizedDetections);
       faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
 
-      if (detections.length > 0 && isCapturing) {
-        setCurrentDescriptor(detections[0].descriptor);
-        checkForDuplicates(detections[0].descriptor);
+      if (detections.length > 0) {
+        console.log('👤 Face detected! isCapturing (ref):', isCapturingRef.current);
+        if (isCapturingRef.current) {
+          setCurrentDescriptor(detections[0].descriptor);
+          checkForDuplicates(detections[0].descriptor);
+        }
+      } else {
+        console.log('😶 No face detected');
       }
     }, 100);
 
@@ -213,7 +231,13 @@ function Register() {
 
           <div className="space-y-3">
             <button
-              onClick={() => setIsCapturing(!isCapturing)}
+              onClick={() => {
+                console.log('Capture button clicked, isCapturing:', isCapturing, 'modelsLoaded:', modelsLoaded);
+                const newValue = !isCapturing;
+                setIsCapturing(newValue);
+                isCapturingRef.current = newValue;
+                console.log('Set isCapturing to:', newValue);
+              }}
               disabled={!modelsLoaded}
               className={`w-full py-3 rounded-lg font-semibold transition-colors ${
                 isCapturing
@@ -222,6 +246,7 @@ function Register() {
               } ${!modelsLoaded ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               {isCapturing ? 'Stop Capture' : 'Start Face Capture'}
+              {!modelsLoaded && ' (Loading...)'}
             </button>
 
             {currentDescriptor && (

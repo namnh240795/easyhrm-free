@@ -2,12 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Mirror video for natural face tracking */
-video, canvas.video-face-api {
-  transform: scaleX(-1);
-}
-
-/* Ensure face detection boxes are also mirrored */
-.canvas.face-api-canvans {
+/* Mirror video and canvas for natural face tracking */
+#video, #canvas {
   transform: scaleX(-1);
 }

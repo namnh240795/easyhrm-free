@@ -56,7 +56,11 @@ function Validate() {
     async function startVideo() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
+          video: {
+            width: { ideal: 1920, min: 1280 },
+            height: { ideal: 1080, min: 720 },
+            facingMode: 'user'
+          }
         });
         videoRef.current.srcObject = stream;
 
@@ -94,7 +98,7 @@ function Validate() {
       if (video.paused || video.ended) return;
 
       const detections = await faceapi
-        .detectAllFaces(video)
+        .detectAllFaces(video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3, maxResults: 10 }))
         .withFaceLandmarks()
         .withFaceDescriptors();
 
