@@ -14,7 +14,7 @@ function Validate() {
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [mode, setMode] = useState('manual'); // 'manual' or 'auto'
   const [registeredFaces, setRegisteredFaces] = useState([]);
-  const [currentMatch, setCurrentMatch] = useState(null);
+  const [currentMatches, setCurrentMatches] = useState([]);
   const [isScanning, setIsScanning] = useState(false);
   const scanIntervalRef = useRef(null);
 
@@ -110,7 +110,9 @@ function Validate() {
       faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
 
       if (mode === 'auto' && detections.length > 0) {
-        validateFace(detections[0]);
+        for (const detection of detections) {
+          validateFace(detection);
+        }
       }
     };
 
@@ -122,24 +124,38 @@ function Validate() {
     }
   }
 
+  function findAllMatches(descriptor) {
+    const matches = [];
+
+    for (const face of registeredFaces) {
+      const distance = euclideanDistance(descriptor, face.descriptor);
+      if (distance <= MATCH_THRESHOLD) {
+        const confidence = Math.max(0, Math.min(100, (1 - (distance / MATCH_THRESHOLD)) * 100));
+        matches.push({ face, distance, confidence });
+      }
+    }
+
+    return matches.sort((a, b) => b.confidence - a.confidence);
+  }
+
   function validateFace(detection) {
     if (registeredFaces.length === 0) {
-      setCurrentMatch({ found: false, reason: 'No registered faces' });
+      setCurrentMatches([{ found: false, reason: 'No registered faces' }]);
       return;
     }
 
-    const match = findMatch(detection.descriptor);
+    const matches = findAllMatches(detection.descriptor);
 
-    if (match) {
-      setCurrentMatch({
+    if (matches.length > 0) {
+      setCurrentMatches(matches.map(m => ({
         found: true,
-        name: match.face.name,
-        confidence: match.confidence,
-        distance: match.distance,
-        registeredAt: match.face.createdAt
-      });
+        name: m.face.name,
+        confidence: m.confidence,
+        distance: m.distance,
+        registeredAt: m.face.createdAt
+      })));
     } else {
-      setCurrentMatch({ found: false, reason: 'No matching face found' });
+      setCurrentMatches([{ found: false, reason: 'No matching face found' }]);
     }
   }
 
@@ -256,42 +272,49 @@ function Validate() {
           <div className="bg-white rounded-2xl shadow-lg p-6">
             <h3 className="text-xl font-bold text-gray-900 mb-4">Validation Result</h3>
 
-            {!currentMatch ? (
+            {currentMatches.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <p>No scan performed yet</p>
                 <p className="text-sm mt-2">
                   {mode === 'manual' ? 'Click "Scan Face" to validate' : 'Look at the camera for automatic validation'}
                 </p>
               </div>
-            ) : currentMatch.found ? (
+            ) : currentMatches.some(m => m.found) ? (
               <div className="space-y-3">
                 <div className="p-4 bg-green-50 rounded-lg border border-green-200">
-                  <p className="text-green-800 font-bold text-lg">✓ Face Matched!</p>
+                  <p className="text-green-800 font-bold text-lg">✓ {currentMatches.filter(m => m.found).length} Face(s) Matched!</p>
                 </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Name:</span>
-                    <span className="font-semibold text-gray-900">{currentMatch.name}</span>
+                {currentMatches.filter(m => m.found).map((match, idx) => (
+                  <div key={idx} className="space-y-2 p-3 bg-green-50 rounded-lg border border-green-200">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Name:</span>
+                      <span className="font-semibold text-gray-900">{match.name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Confidence:</span>
+                      <span className="font-semibold text-green-600">{match.confidence.toFixed(1)}%</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Distance:</span>
+                      <span className="font-semibold text-gray-900">{match.distance.toFixed(4)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Registered:</span>
+                      <span className="text-sm text-gray-600">
+                        {new Date(match.registeredAt).toLocaleDateString()}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Confidence:</span>
-                    <span className="font-semibold text-green-600">{currentMatch.confidence.toFixed(1)}%</span>
+                ))}
+                {currentMatches.filter(m => !m.found).map((match, idx) => (
+                  <div key={`nomatch-${idx}`} className="p-3 bg-red-50 rounded-lg border border-red-200">
+                    <p className="text-red-800 font-semibold">✗ {match.reason}</p>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Distance:</span>
-                    <span className="font-semibold text-gray-900">{currentMatch.distance.toFixed(4)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Registered:</span>
-                    <span className="text-sm text-gray-600">
-                      {new Date(currentMatch.registeredAt).toLocaleDateString()}
-                    </span>
-                  </div>
-                </div>
+                ))}
               </div>
             ) : (
               <div className="p-4 bg-red-50 rounded-lg border border-red-200">
-                <p className="text-red-800 font-bold">✗ {currentMatch.reason}</p>
+                <p className="text-red-800 font-bold">✗ {currentMatches[0].reason}</p>
               </div>
             )}
           </div>

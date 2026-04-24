@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { Routes, Route, Navigate, Outlet, HashRouter } from 'react-router-dom';
 import Home from './pages/Home';
 import Attendance from './pages/Attendance';
 import Register from './pages/Register';
