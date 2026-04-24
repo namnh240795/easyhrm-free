@@ -5,7 +5,10 @@ import { useFaceDB } from '../hooks/useFaceDB';
 
 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
 const MATCH_THRESHOLD = 0.5;
-const SCAN_COOLDOWN = 1000; // Reduced cooldown to match faster frame rate
+const SCAN_COOLDOWN = 1000;
+const DB_SAVE_DEBOUNCE = 500;
+const FACE_TRACKING_TIMEOUT = 5000;
+const FPS_INTERVAL = 33; // ~30 FPS for production
 
 const ZONES = {
   LEFT: { name: 'left', min: 0, max: 0.3 },
@@ -35,19 +38,34 @@ function Attendance() {
   const isAttendanceActiveRef = useRef(false);
   const testModeRef = useRef(false);
   const isMotionDetectionEnabledRef = useRef(true);
+  const dbSaveDebounceRef = useRef({ timeouts: {}, pending: {} });
+  const pendingActionRef = useRef({});
+  const lastScansRef = useRef({});
+  const faceTrackingRef = useRef({});
+  const cleanupTimeoutRef = useRef(null);
 
   // Update refs when state changes
   useEffect(() => {
     isAttendanceActiveRef.current = isAttendanceActive;
   }, [isAttendanceActive]);
 
-  useEffect(() => {
-    testModeRef.current = testMode;
-  }, [testMode]);
-
-  useEffect(() => {
+useEffect(() => {
     isMotionDetectionEnabledRef.current = isMotionDetectionEnabled;
   }, [isMotionDetectionEnabled]);
+
+  useEffect(() => {
+    lastScansRef.current = lastScans;
+  }, [lastScans]);
+
+  useEffect(() => {
+    return () => {
+      if (cleanupTimeoutRef.current) {
+        clearTimeout(cleanupTimeoutRef.current);
+      }
+      Object.values(dbSaveDebounceRef.current.timeouts || {}).forEach(t => clearTimeout(t));
+      Object.keys(faceTrackingRef.current).forEach(id => delete faceTrackingRef.current[id]);
+    };
+  }, []);
 
   // Debug state
   const [debugInfo, setDebugInfo] = useState({
@@ -159,7 +177,6 @@ function Attendance() {
   }, [modelsLoaded]);
 
   // Face detection loop
-  const faceTrackingRef = useRef({});
 
   function startFaceDetection() {
     const video = videoRef.current;
@@ -196,7 +213,7 @@ function Attendance() {
       if (isAttendanceActiveRef.current && detections.length > 0) {
         await processFaceDetection(detections, displaySize.width);
       }
-    }, 10); // 100 FPS for ultra-fast motion detection 🚀
+    }, FPS_INTERVAL);
 
     return () => clearInterval(scanInterval);
   }
@@ -339,6 +356,38 @@ function Attendance() {
     );
   }
 
+  async function debouncedDbSave(action, faceId, name, confidence) {
+    const key = `${action}-${faceId}`;
+    const current = dbSaveDebounceRef.current;
+
+    if (current.timeouts && current.timeouts[key]) {
+      clearTimeout(current.timeouts[key]);
+    }
+
+    if (!current.pending) {
+      current.pending = {};
+    }
+    current.pending[key] = { action, faceId, name, confidence };
+
+    current.timeouts = current.timeouts || {};
+    current.timeouts[key] = setTimeout(async () => {
+      try {
+        if (current.pending && current.pending[key]) {
+          const { action, faceId, name, confidence } = current.pending[key];
+          if (action === 'checkin') {
+            await faceDB.recordCheckIn(faceId, name, confidence);
+          } else {
+            await faceDB.recordCheckOut(faceId, name, confidence);
+          }
+          delete current.pending[key];
+        }
+      } catch (error) {
+        console.error('Failed to save attendance record:', error);
+        delete current.pending[key];
+      }
+    }, DB_SAVE_DEBOUNCE);
+  }
+
   async function processFaceDetection(detections, videoWidth) {
     const now = Date.now();
 
@@ -346,8 +395,7 @@ function Attendance() {
       const match = findMatch(detection.descriptor);
       if (!match) continue;
 
-      // Check per-user cooldown
-      const lastScan = lastScans[match.face.id];
+      const lastScan = lastScansRef.current[match.face.id];
       if (lastScan && now - lastScan.time < SCAN_COOLDOWN) {
         console.log(`⏸️ ${match.face.name} is on cooldown (${Math.round((SCAN_COOLDOWN - (now - lastScan.time)) / 1000)}s remaining)`);
         continue;
@@ -382,15 +430,22 @@ function Attendance() {
       // Keep only last 2000ms of positions (increased for better tracking during intermittent detection)
       tracking.positions = tracking.positions.filter(p => now - p.time < 2000);
 
-      // Clear tracking if no movement for 5 seconds (keep data longer for intermittent detection)
+      // Clear tracking if no movement for 5 seconds
       if (tracking.positions.length > 0) {
         const latestPos = tracking.positions[tracking.positions.length - 1];
-        if (now - latestPos.time > 5000) {
-          tracking.positions = [];
-          tracking.zone = null;
+        if (now - latestPos.time > FACE_TRACKING_TIMEOUT) {
+          delete faceTrackingRef.current[match.face.id];
           console.log('🔄 Cleared stale tracking data (5s timeout)');
         }
       }
+
+      // Also cleanup tracking entries for faces no longer in detections
+      const detectedFaceIds = new Set(detections.map(d => findMatch(d.descriptor)?.face.id).filter(Boolean));
+      Object.keys(faceTrackingRef.current).forEach(id => {
+        if (!detectedFaceIds.has(id)) {
+          delete faceTrackingRef.current[id];
+        }
+      });
 
       // Detect direction from zone transitions OR velocity
       let direction = detectZoneTransition(tracking, currentZone);
@@ -406,38 +461,38 @@ function Attendance() {
         if (direction === 'left-to-right') {
           const isCheckedIn = await faceDB.isCheckedIn(match.face.id);
           console.log('  Checked in status:', isCheckedIn);
+          const pendingKey = `${match.face.id}-checkin`;
 
-          if (!isCheckedIn) {
-            await faceDB.recordCheckIn(match.face.id, match.face.name, match.confidence);
+          if (!isCheckedIn && !pendingActionRef.current[pendingKey]) {
+            pendingActionRef.current[pendingKey] = true;
+            debouncedDbSave('checkin', match.face.id, match.face.name, match.confidence);
             showNotification(`✅ ${match.face.name} Checked IN (Left → Right)`, 'success');
             loadActiveSessions();
-            // Reload recent activity
             const records = await faceDB.getAllAttendance();
             setRecentActivity(records.slice(0, 10));
-            // Update this user's cooldown
             setLastScans(prev => ({ ...prev, [match.face.id]: { time: now, userId: match.face.id } }));
-            // Clear positions after successful detection
             tracking.positions = [];
+            setTimeout(() => { delete pendingActionRef.current[pendingKey]; }, DB_SAVE_DEBOUNCE * 2);
           } else {
-            console.log('  Already checked in, ignoring');
+            console.log('  Already checked in or pending, ignoring');
           }
         } else if (direction === 'right-to-left') {
           const isCheckedIn = await faceDB.isCheckedIn(match.face.id);
           console.log('  Checked out status:', isCheckedIn);
+          const pendingKey = `${match.face.id}-checkout`;
 
-          if (isCheckedIn) {
-            await faceDB.recordCheckOut(match.face.id, match.face.name, match.confidence);
+          if (isCheckedIn && !pendingActionRef.current[pendingKey]) {
+            pendingActionRef.current[pendingKey] = true;
+            debouncedDbSave('checkout', match.face.id, match.face.name, match.confidence);
             showNotification(`✅ ${match.face.name} Checked OUT (Right → Left)`, 'success');
             loadActiveSessions();
-            // Reload recent activity
             const records = await faceDB.getAllAttendance();
             setRecentActivity(records.slice(0, 10));
-            // Update this user's cooldown
             setLastScans(prev => ({ ...prev, [match.face.id]: { time: now, userId: match.face.id } }));
-            // Clear positions after successful detection
             tracking.positions = [];
+            setTimeout(() => { delete pendingActionRef.current[pendingKey]; }, DB_SAVE_DEBOUNCE * 2);
           } else {
-            console.log('  Not checked in, ignoring');
+            console.log('  Not checked in or pending, ignoring');
           }
         }
       } else {
