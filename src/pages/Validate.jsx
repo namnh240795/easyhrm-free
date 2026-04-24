@@ -110,9 +110,7 @@ function Validate() {
       faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
 
       if (mode === 'auto' && detections.length > 0) {
-        for (const detection of detections) {
-          validateFace(detection);
-        }
+        validateAllFaces(detections);
       }
     };
 
@@ -147,13 +145,50 @@ function Validate() {
     const matches = findAllMatches(detection.descriptor);
 
     if (matches.length > 0) {
-      setCurrentMatches(matches.map(m => ({
+      const newMatches = matches.map(m => ({
         found: true,
         name: m.face.name,
         confidence: m.confidence,
         distance: m.distance,
         registeredAt: m.face.createdAt
-      })));
+      }));
+      setCurrentMatches(prev => {
+        const existingNames = new Set(prev.filter(m => m.found).map(m => m.name));
+        const uniqueNew = newMatches.filter(m => !existingNames.has(m.name));
+        return [...prev.filter(m => m.found), ...uniqueNew];
+      });
+    } else {
+      setCurrentMatches(prev => {
+        if (prev.some(m => m.found)) return prev;
+        return [...prev, { found: false, reason: 'No matching face found' }];
+      });
+    }
+  }
+
+  function validateAllFaces(detections) {
+    if (registeredFaces.length === 0) {
+      setCurrentMatches([{ found: false, reason: 'No registered faces' }]);
+      return;
+    }
+
+    const allMatches = [];
+    for (const detection of detections) {
+      const matches = findAllMatches(detection.descriptor);
+      for (const m of matches) {
+        if (!allMatches.some(existing => existing.name === m.face.name)) {
+          allMatches.push({
+            found: true,
+            name: m.face.name,
+            confidence: m.confidence,
+            distance: m.distance,
+            registeredAt: m.face.createdAt
+          });
+        }
+      }
+    }
+
+    if (allMatches.length > 0) {
+      setCurrentMatches(allMatches.sort((a, b) => b.confidence - a.confidence));
     } else {
       setCurrentMatches([{ found: false, reason: 'No matching face found' }]);
     }
@@ -185,7 +220,7 @@ function Validate() {
     );
   }
 
-  function handleManualScan() {
+function handleManualScan() {
     if (!videoRef.current) return;
 
     faceapi.detectAllFaces(videoRef.current)
@@ -193,9 +228,9 @@ function Validate() {
       .withFaceDescriptors()
       .then(detections => {
         if (detections.length > 0) {
-          validateFace(detections[0]);
+          validateAllFaces(detections);
         } else {
-          setCurrentMatch({ found: false, reason: 'No face detected' });
+          setCurrentMatches([{ found: false, reason: 'No face detected' }]);
         }
       });
   }
