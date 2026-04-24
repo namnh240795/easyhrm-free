@@ -5,6 +5,7 @@ export default defineConfig({
     port: 3002,
     open: true
   },
+  base: './',
   build: {
     outDir: 'dist'
   }
